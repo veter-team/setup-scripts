@@ -145,6 +145,7 @@ function update_all()
     set_environment
     update_bitbake
     update_oe
+    update_veterlayer
 }
 
 ###############################################################################
@@ -199,6 +200,32 @@ function oe_config()
 
     echo ""
     echo "Setup for ${CL_MACHINE} completed"
+}
+
+###############################################################################
+# UPDATE_VETERLAYER() - Update veter project layer 
+###############################################################################
+function update_veterlayer()
+{
+    if [ "x$PROXYHOST" != "x" ] ; then
+        config_git_proxy
+    fi
+
+    if [ "USE_SUBMODULES" = "true" ] ; then
+        echo "Updating bitbake submodule"
+        git submodule update --init ${OE_SOURCE_DIR}/veter
+    else
+        if [ ! -d ${OE_SOURCE_DIR}/veter/conf ]; then
+            rm -rf  ${OE_SOURCE_DIR}/veter
+            echo Checking out veter layer
+            git clone git://gitorious.org/veter/veterlayer.git ${OE_SOURCE_DIR}/veter
+            # cd ${OE_SOURCE_DIR}/veter && git checkout -b 1.0 origin/1.0
+        else
+            echo "Updating veter layer"
+            echo "Executing: cd ${OE_SOURCE_DIR}/veter && git pull --rebase"
+            cd ${OE_SOURCE_DIR}/veter && git pull --rebase
+        fi
+    fi
 }
 
 
@@ -317,6 +344,7 @@ BBFILES ?= ""
 # Make sure to have a conf/layers.conf in there
 BBLAYERS = " \\
   ${OE_SOURCE_DIR}/openembedded \\
+  ${OE_SOURCE_DIR}/veter \\
   "
 _EOF
     fi
@@ -342,8 +370,8 @@ IMAGE_FSTYPES += "tar.bz2"
 # Make use of SMP:
 #   PARALLEL_MAKE specifies how many concurrent compiler threads are spawned per bitbake process
 #   BB_NUMBER_THREADS specifies how many concurrent bitbake tasks will be run
-#PARALLEL_MAKE     = "-j2"
-BB_NUMBER_THREADS = "2"
+#PARALLEL_MAKE     = "-j4"
+BB_NUMBER_THREADS = "8"
 
 DISTRO   = "${DISTRO}"
 MACHINE ?= "${MACHINE}"

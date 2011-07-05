@@ -4,3 +4,6 @@
 [submodule "sources/openembedded"]
 	path = sources/openembedded
 	url = git://git.openembedded.org/openembedded
+[submodule "sources/veterlayer"]
+	path = sources/veter
+	url = git://gitorious.org/veter/veterlayer.git
