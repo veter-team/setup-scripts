@@ -1,0 +1,4 @@
+console=ttyS2,115200n8
+optargs=mem=80M@0x80000000 mem=384M@0x88000000 xeno_hal.clockfreq=600000000 xeno_hal.cpufreq=600000000
+mpurate=600
+mmcargs=setenv bootargs console=${console} mpurate=${mpurate} ${optargs} root=${mmcroot} rootfstype=${mmcrootfstype}
