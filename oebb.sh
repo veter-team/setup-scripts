@@ -218,7 +218,7 @@ function update_veterlayer()
         if [ ! -d ${OE_SOURCE_DIR}/veter/conf ]; then
             rm -rf  ${OE_SOURCE_DIR}/veter
             echo Checking out veter layer
-            git clone git://gitorious.org/veter/veterlayer.git ${OE_SOURCE_DIR}/veter
+            git clone git://github.com/veter-team/veterlayer.git ${OE_SOURCE_DIR}/veter
             # cd ${OE_SOURCE_DIR}/veter && git checkout -b 1.0 origin/1.0
         else
             echo "Updating veter layer"
