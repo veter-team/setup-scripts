@@ -164,20 +164,22 @@ function clean_oe()
 ###############################################################################
 function oe_build()
 {
-    if [ ! -e ${OE_BUILD_DIR}/conf/local.conf ] ; then
-        if [ -z $MACHINE ] ; then
-            echo "No config found, please run $0 config <machine> first"
-        else
-            CL_MACHINE=$MACHINE
-            set_environment
-            config_oe && update_all
-        fi
-    fi
+    # For our build this is not required
+    #if [ ! -e ${OE_BUILD_DIR}/conf/local.conf ] ; then
+    #    if [ -z $MACHINE ] ; then
+    #        echo "No config found, please run $0 config <machine> first"
+    #    else
+    #        CL_MACHINE=$MACHINE
+    #        set_environment
+    #        config_oe && update_all
+    #    fi
+    #fi
 
     set_environment
-    if [ -e ~/.oe/environment-2008 ] ; then
-        echo "Using ~/.oe/environment-2008 to setup needed variables. It is recommended to do '. ~/.oe/environment-2008' and run 'bitbake something' without using $0 as wrapper"
-    fi
+    # Remove the message as it's mesleading, we do want to use oebb as wrapper
+    #if [ -e ~/.oe/environment-2008 ] ; then
+    #    echo "Using ~/.oe/environment-2008 to setup needed variables. It is recommended to do '. ~/.oe/environment-2008' and run 'bitbake something' without using $0 as wrapper"
+    #fi
     cd ${OE_BUILD_DIR}
     if [ -z $MACHINE ] ; then
         echo "Executing: bitbake" $*
