@@ -221,7 +221,7 @@ function update_veterlayer()
             rm -rf  ${OE_SOURCE_DIR}/veter
             echo Checking out veter layer
             git clone git://github.com/veter-team/veterlayer.git ${OE_SOURCE_DIR}/veter
-            # cd ${OE_SOURCE_DIR}/veter && git checkout -b 1.0 origin/1.0
+            cd ${OE_SOURCE_DIR}/veter && git checkout -b 2011.03-maintenance origin/2011.03-maintenance
         else
             echo "Updating veter layer"
             echo "Executing: cd ${OE_SOURCE_DIR}/veter && git pull --rebase"
