@@ -4,7 +4,7 @@
 # Later changes by Koen Kooi and Brijesh Singh
 
 # Revision history:
-# 20090902: download from twice
+# 20090902: download from twiki
 # 20090903: Weakly assign MACHINE and DISTRO
 # 20090904:  * Don't recreate local.conf is it already exists
 #            * Pass 'unknown' machines to OE directly
@@ -16,7 +16,7 @@
 # 20091202: Fix proxy setup
 #
 # For further changes consult 'git log' or browse to:
-#   http://gitorious.org/angstrom/angstrom-setup-scripts/commits
+#   http://git.angstrom-distribution.org/cgi-bin/cgit.cgi/setup-scripts/
 # to see the latest revision history
 
 # Use this till we get a maintenance branch based of the release tag
@@ -33,14 +33,59 @@ PROXYHOST=""
 # OE_BASE    - The root directory for all OE sources and development.
 ###############################################################################
 OE_BASE=${PWD}
+# incremement this to force recreation of config files
+BASE_VERSION=5
+OE_ENV_FILE=~/.oe/environment-angstromv2012.05
 
-#--------------------------------------------------------------------------
-# Check if this script was cloned from http://gitorious.org/angstrom/angstrom-setup-scripts or not
-#--------------------------------------------------------------------------
-
-if [ -e ${OE_BASE}/.gitmodules ] ; then
-    USE_SUBMODULES="sort-of-true"
+if ! git help log | grep -q no-abbrev ; then 
+	echo "Your installed version of git is too old, it lacks --no-abbrev. Please install 1.7.6 or newer"
+	exit 1
 fi
+
+
+###############################################################################
+# CONFIG_OE() - Configure OpenEmbedded
+###############################################################################
+function config_oe()
+{
+
+    MACHINE="${CL_MACHINE}"
+
+    #--------------------------------------------------------------------------
+    # Write out the OE bitbake configuration file.
+    #--------------------------------------------------------------------------
+    mkdir -p ${OE_BUILD_DIR}/conf
+
+    # There's no need to rewrite site.conf when changing MACHINE
+    if [ ! -e ${OE_BUILD_DIR}/conf/site.conf ]; then
+        cat > ${OE_BUILD_DIR}/conf/site.conf <<_EOF
+
+SCONF_VERSION = "1"
+
+# Where to store sources
+DL_DIR = "${OE_SOURCE_DIR}/downloads"
+
+# Where to save shared state
+SSTATE_DIR = "${OE_BUILD_DIR}/build/sstate-cache"
+
+# Which files do we want to parse:
+BBFILES ?= "${OE_SOURCE_DIR}/openembedded-core/meta/recipes-*/*/*.bb"
+
+TMPDIR = "${OE_BUILD_TMPDIR}"
+
+# Go through the Firewall
+#HTTP_PROXY        = "http://${PROXYHOST}:${PROXYPORT}/"
+
+_EOF
+fi
+    if [ ! -e ${OE_BUILD_DIR}/conf/auto.conf ]; then
+        cat > ${OE_BUILD_DIR}/conf/auto.conf <<_EOF
+MACHINE ?= "${MACHINE}"
+_EOF
+    else
+	eval "sed -i -e 's/^MACHINE.*$/MACHINE ?= \"${MACHINE}\"/g' ${OE_BUILD_DIR}/conf/auto.conf"
+fi
+}
 
 ###############################################################################
 # SET_ENVIRONMENT() - Setup environment variables for OE development
@@ -48,11 +93,26 @@ fi
 function set_environment()
 {
 
+# Workaround for differences between yocto bitbake and vanilla bitbake
+export BBFETCH2=True
+
+export TAG
+
 #--------------------------------------------------------------------------
 # If an env already exists, use it, otherwise generate it
 #--------------------------------------------------------------------------
-if [ -e ~/.oe/environment-2008 ] ; then
-    . ~/.oe/environment-2008
+
+if [ -e ${OE_ENV_FILE} ] ; then
+    . ${OE_ENV_FILE}
+fi
+
+if [ x"${BASE_VERSION}" != x"${SCRIPTS_BASE_VERSION}" ] ; then
+	echo "BASE_VERSION mismatch, recreating ${OE_ENV_FILE}"
+	rm -f ${OE_ENV_FILE} ${OE_BUILD_DIR}/conf/site.conf
+fi
+
+if [ -e ${OE_ENV_FILE} ] ; then
+    . ${OE_ENV_FILE}
 else
 
     mkdir -p ~/.oe/
@@ -60,43 +120,48 @@ else
     #--------------------------------------------------------------------------
     # Specify distribution information
     #--------------------------------------------------------------------------
-    DISTRO="angstrom-2008.1"
+    DISTRO=$(grep DISTRO conf/local.conf | grep -v '^#' | awk -F\" '{print $2}')
     DISTRO_DIRNAME=`echo $DISTRO | sed s#[.-]#_#g`
 
-    echo "export DISTRO=\"${DISTRO}\"" > ~/.oe/environment-2008
-    echo "export DISTRO_DIRNAME=\"${DISTRO_DIRNAME}\"" >> ~/.oe/environment-2008
+    echo "export SCRIPTS_BASE_VERSION=${BASE_VERSION}" > ${OE_ENV_FILE}
+    echo "export BBFETCH2=True" >> ${OE_ENV_FILE}
+
+    echo "export DISTRO=\"${DISTRO}\"" >> ${OE_ENV_FILE}
+    echo "export DISTRO_DIRNAME=\"${DISTRO_DIRNAME}\"" >> ${OE_ENV_FILE}
 
     #--------------------------------------------------------------------------
     # Specify the root directory for your OpenEmbedded development
     #--------------------------------------------------------------------------
-    OE_BUILD_DIR=${OE_BASE}/build
-    OE_BUILD_TMPDIR="${OE_BUILD_DIR}/tmp-${DISTRO_DIRNAME}"
+    OE_BUILD_DIR=${OE_BASE}
+    OE_BUILD_TMPDIR="${OE_BUILD_DIR}/build/tmp-${DISTRO_DIRNAME}"
     OE_SOURCE_DIR=${OE_BASE}/sources
 
+    export BUILDDIR=${OE_BUILD_DIR}
     mkdir -p ${OE_BUILD_DIR}
     mkdir -p ${OE_SOURCE_DIR}
     export OE_BASE
 
-    echo "export OE_BUILD_DIR=\"${OE_BUILD_DIR}\"" >> ~/.oe/environment-2008
-    echo "export OE_BUILD_TMPDIR=\"${OE_BUILD_TMPDIR}\"" >> ~/.oe/environment-2008
-    echo "export OE_SOURCE_DIR=\"${OE_SOURCE_DIR}\"" >> ~/.oe/environment-2008
+    echo "export OE_BUILD_DIR=\"${OE_BUILD_DIR}\"" >> ${OE_ENV_FILE}
+    echo "export BUILDDIR=\"${OE_BUILD_DIR}\"" >> ${OE_ENV_FILE}
+    echo "export OE_BUILD_TMPDIR=\"${OE_BUILD_TMPDIR}\"" >> ${OE_ENV_FILE}
+    echo "export OE_SOURCE_DIR=\"${OE_SOURCE_DIR}\"" >> ${OE_ENV_FILE}
 
-    echo "export OE_BASE=\"${OE_BASE}\"" >> ~/.oe/environment-2008
+    echo "export OE_BASE=\"${OE_BASE}\"" >> ${OE_ENV_FILE}
 
     #--------------------------------------------------------------------------
     # Include up-to-date bitbake in our PATH.
     #--------------------------------------------------------------------------
-    export PATH=${OE_SOURCE_DIR}/bitbake/bin:${PATH}
+    export PATH=${OE_SOURCE_DIR}/openembedded-core/scripts:${OE_SOURCE_DIR}/bitbake/bin:${PATH}
 
-    echo "export PATH=\"${PATH}\"" >> ~/.oe/environment-2008
+    echo "export PATH=\"${PATH}\"" >> ${OE_ENV_FILE}
 
     #--------------------------------------------------------------------------
     # Make sure Bitbake doesn't filter out the following variables from our
     # environment.
     #--------------------------------------------------------------------------
-    export BB_ENV_EXTRAWHITE="MACHINE DISTRO GIT_PROXY_COMMAND ANGSTROMLIBC http_proxy ftp_proxy https_proxy all_proxy ALL_PROXY no_proxy SSH_AGENT_PID SSH_AUTH_SOCK BB_SRCREV_POLICY SDKMACHINE BB_NUMBER_THREADS"
+    export BB_ENV_EXTRAWHITE="MACHINE DISTRO TCLIBC TCMODE GIT_PROXY_COMMAND http_proxy ftp_proxy https_proxy all_proxy ALL_PROXY no_proxy SSH_AGENT_PID SSH_AUTH_SOCK BB_SRCREV_POLICY SDKMACHINE BB_NUMBER_THREADS"
 
-    echo "export BB_ENV_EXTRAWHITE=\"${BB_ENV_EXTRAWHITE}\"" >> ~/.oe/environment-2008
+    echo "export BB_ENV_EXTRAWHITE=\"${BB_ENV_EXTRAWHITE}\"" >> ${OE_ENV_FILE}
 
     #--------------------------------------------------------------------------
     # Specify proxy information
@@ -108,10 +173,11 @@ else
         export SVN_CONFIG_DIR=${OE_BUILD_DIR}/subversion_config
         export GIT_CONFIG_DIR=${OE_BUILD_DIR}/git_config
 
-        echo "export http_proxy=\"${http_proxy}\"" >> ~/.oe/environment-2008
-        echo "export ftp_proxy=\"${ftp_proxy}\"" >> ~/.oe/environment-2008
-        echo "export SVN_CONFIG_DIR=\"${SVN_CONFIG_DIR}\"" >> ~/.oe/environment-2008
-        echo "export GIT_CONFIG_DIR=\"${GIT_CONFIG_DIR}\"" >> ~/.oe/environment-2008
+        echo "export http_proxy=\"${http_proxy}\"" >> ${OE_ENV_FILE}
+        echo "export ftp_proxy=\"${ftp_proxy}\"" >> ${OE_ENV_FILE}
+        echo "export SVN_CONFIG_DIR=\"${SVN_CONFIG_DIR}\"" >> ${OE_ENV_FILE}
+        echo "export GIT_CONFIG_DIR=\"${GIT_CONFIG_DIR}\"" >> ${OE_ENV_FILE}
+        echo "export GIT_PROXY_COMMAND=\"\${GIT_CONFIG_DIR}/git-proxy.sh\"" >> ${OE_ENV_FILE}
 
         config_svn_proxy
         config_git_proxy
@@ -120,22 +186,26 @@ else
     #--------------------------------------------------------------------------
     # Set up the bitbake path to find the OpenEmbedded recipes.
     #--------------------------------------------------------------------------
-    export BBPATH=${OE_BUILD_DIR}:${OE_SOURCE_DIR}/openembedded${BBPATH_EXTRA}
+    export BBPATH=${OE_BUILD_DIR}:${OE_SOURCE_DIR}/openembedded-core/meta${BBPATH_EXTRA}
 
-    echo "export BBPATH=\"${BBPATH}\"" >> ~/.oe/environment-2008
+    echo "export BBPATH=\"${BBPATH}\"" >> ${OE_ENV_FILE}
 
     #--------------------------------------------------------------------------
-    # Reconfigure dash
+    # Look for dash
     #--------------------------------------------------------------------------
     if [ "$(readlink /bin/sh)" = "dash" ] ; then
-        sudo aptitude install expect -y
-        expect -c 'spawn sudo dpkg-reconfigure -freadline dash; send "n\n"; interact;'
+	echo "/bin/sh is a symlink to dash, please point it to bash instead"
+        exit 1
     fi
 
-    echo "There now is a sourceable script in ~/.oe/enviroment. You can do '. ~/.oe/environment-2008' and run 'bitbake something' without using $0 as wrapper"
-fi # if -e ~/.oe/environment-2008
-}
+    echo "There now is a sourceable script in ~/.oe/enviroment. You can do '. ${OE_ENV_FILE}' and run 'bitbake something' without using $0 as wrapper"
+fi # if -e ${OE_ENV_FILE}
 
+if ! [ -e ${OE_BUILD_DIR}/conf/site.conf ] ; then
+	config_oe
+fi
+
+}
 
 ###############################################################################
 # UPDATE_ALL() - Make sure everything is up to date
@@ -143,9 +213,7 @@ fi # if -e ~/.oe/environment-2008
 function update_all()
 {
     set_environment
-    update_bitbake
     update_oe
-    update_veterlayer
 }
 
 ###############################################################################
@@ -164,22 +232,20 @@ function clean_oe()
 ###############################################################################
 function oe_build()
 {
-    # For our build this is not required
-    #if [ ! -e ${OE_BUILD_DIR}/conf/local.conf ] ; then
-    #    if [ -z $MACHINE ] ; then
-    #        echo "No config found, please run $0 config <machine> first"
-    #    else
-    #        CL_MACHINE=$MACHINE
-    #        set_environment
-    #        config_oe && update_all
-    #    fi
-    #fi
+    if [ ! -e ${OE_BUILD_DIR}/conf/auto.conf ] ; then
+        if [ -z $MACHINE ] ; then
+            echo "No config found, please run $0 config <machine> first"
+        else
+            CL_MACHINE=$MACHINE
+            set_environment
+            config_oe && update_all
+        fi
+    fi
 
     set_environment
-    # Remove the message as it's mesleading, we do want to use oebb as wrapper
-    #if [ -e ~/.oe/environment-2008 ] ; then
-    #    echo "Using ~/.oe/environment-2008 to setup needed variables. It is recommended to do '. ~/.oe/environment-2008' and run 'bitbake something' without using $0 as wrapper"
-    #fi
+    if [ -e ${OE_ENV_FILE} ] ; then
+        echo "Using ${OE_ENV_FILE} to setup needed variables. It is recommended to do '. ${OE_ENV_FILE}' and run 'bitbake something' without using $0 as wrapper"
+    fi
     cd ${OE_BUILD_DIR}
     if [ -z $MACHINE ] ; then
         echo "Executing: bitbake" $*
@@ -205,60 +271,6 @@ function oe_config()
 }
 
 ###############################################################################
-# UPDATE_VETERLAYER() - Update veter project layer 
-###############################################################################
-function update_veterlayer()
-{
-    if [ "x$PROXYHOST" != "x" ] ; then
-        config_git_proxy
-    fi
-
-    if [ "USE_SUBMODULES" = "true" ] ; then
-        echo "Updating bitbake submodule"
-        git submodule update --init ${OE_SOURCE_DIR}/veter
-    else
-        if [ ! -d ${OE_SOURCE_DIR}/veter/conf ]; then
-            rm -rf  ${OE_SOURCE_DIR}/veter
-            echo Checking out veter layer
-            git clone git://github.com/veter-team/veterlayer.git ${OE_SOURCE_DIR}/veter
-            # cd ${OE_SOURCE_DIR}/veter && git checkout -b 1.0 origin/1.0
-        else
-            echo "Updating veter layer"
-            echo "Executing: cd ${OE_SOURCE_DIR}/veter && git pull --rebase"
-            cd ${OE_SOURCE_DIR}/veter && git pull --rebase
-        fi
-    fi
-}
-
-
-###############################################################################
-# UPDATE_BITBAKE() - Update Bitbake distribution
-###############################################################################
-function update_bitbake()
-{
-    if [ "x$PROXYHOST" != "x" ] ; then
-        config_git_proxy
-    fi
-
-    if [ "USE_SUBMODULES" = "true" ] ; then
-        echo "Updating bitbake submodule"
-        git submodule update --init ${OE_SOURCE_DIR}/bitbake
-    else
-        if [ ! -d ${OE_SOURCE_DIR}/bitbake/bin ]; then
-            rm -rf  ${OE_SOURCE_DIR}/bitbake
-            echo Checking out bitbake
-            git clone git://git.openembedded.org/bitbake ${OE_SOURCE_DIR}/bitbake
-            cd ${OE_SOURCE_DIR}/bitbake && git checkout -b 1.12 origin/1.12
-        else
-            echo "Updating bitbake"
-            echo "Executing: cd ${OE_SOURCE_DIR}/bitbake && git pull --rebase"
-            cd ${OE_SOURCE_DIR}/bitbake && git pull --rebase
-        fi
-    fi
-}
-
-
-###############################################################################
 # UPDATE_OE() - Update OpenEmbedded distribution.
 ###############################################################################
 function update_oe()
@@ -267,128 +279,8 @@ function update_oe()
         config_git_proxy
     fi
 
-    if [ "USE_SUBMODULES" = "true" ] ; then
-        echo "Updating OE submodule"
-        git submodule update --init ${OE_SOURCE_DIR}/openembedded
-    else
-        if [ ! -d  ${OE_SOURCE_DIR}/openembedded/conf ]; then
-            rm -rf  ${OE_SOURCE_DIR}/openembedded/
-            echo Checking out OpenEmbedded
-            git clone git://github.com/openembedded/openembedded.git ${OE_SOURCE_DIR}/openembedded
-            cd ${OE_SOURCE_DIR}/openembedded
-            if [ ! -r ${OE_COMMIT_ID} ];
-            then
-                echo "Checkout commit id: ${OE_COMMIT_ID}"
-                git checkout -b release-2011.03-angstrom ${OE_COMMIT_ID}
-            else
-                echo "Checking out OE, depending on your git version you might get a harmless, what git alarmingly calls 'fatal' error. It just means the branch already exists."
-                git checkout -b 2011.03-maintenance origin/2011.03-maintenance || true
-            fi
-        else
-            echo Updating OpenEmbedded
-            cd ${OE_SOURCE_DIR}/openembedded
-            if [ ! -r ${OE_COMMIT_ID} ];
-            then
-                echo "Checkout commit id: ${OE_COMMIT_ID}"
-                git remote update origin
-                git checkout ${OE_COMMIT_ID}
-                git checkout -b install
-            else
-                echo "Executing: git pull --rebase"
-                git pull --rebase
-            fi
-        fi
-    fi
-}
-
-
-###############################################################################
-# CONFIG_OE() - Configure OpenEmbedded
-###############################################################################
-function config_oe()
-{
-    #--------------------------------------------------------------------------
-    # Determine the proper machine name
-    #--------------------------------------------------------------------------
-    case ${CL_MACHINE} in
-        beagle|beagleboard)
-            MACHINE="beagleboard"
-            ;;
-        dm6446evm|davinci-evm)
-            MACHINE="davinci-dvevm"
-            ;;
-        omap3evm)
-            MACHINE="omap3evm"
-            ;;
-        shiva|omap3517-evm)
-            MACHINE="omap3517-evm"
-            ;;
-        *)
-            echo "Unknown machine ${CL_MACHINE}, passing it to OE directly"
-            MACHINE="${CL_MACHINE}"
-            ;;
-    esac
-
-    #--------------------------------------------------------------------------
-    # Write out the OE bitbake configuration file.
-    #--------------------------------------------------------------------------
-    mkdir -p ${OE_BUILD_DIR}/conf
-
-    if [ ! -e ${OE_BUILD_DIR}/conf/bblayers.conf ]; then
-	cat > ${OE_BUILD_DIR}/conf/bblayers.conf <<_EOF
-# LAYER_CONF_VERSION is increased each time build/conf/bblayers.conf
-# changes incompatibly
-LCONF_VERSION = "1"
-
-BBFILES ?= ""
-
-# Add your overlay location to BBLAYERS
-# Make sure to have a conf/layers.conf in there
-BBLAYERS = " \\
-  ${OE_SOURCE_DIR}/openembedded \\
-  ${OE_SOURCE_DIR}/veter \\
-  "
-_EOF
-    fi
-
-    # There's no need to rewrite local.conf when changing MACHINE
-    if [ ! -e ${OE_BUILD_DIR}/conf/local.conf ]; then
-        cat > ${OE_BUILD_DIR}/conf/local.conf <<_EOF
-# Where to store sources
-DL_DIR = "${OE_SOURCE_DIR}/downloads"
-
-INHERIT += "rm_work"
-
-# Which files do we want to parse:
-BBFILES ?= "${OE_SOURCE_DIR}/openembedded/recipes/*/*.bb"
-BBMASK = ""
-
-# Qemu 0.12.x is giving too much problems recently (2010.05), so disable it for users
-ENABLE_BINARY_LOCALE_GENERATION = "0"
-
-# What kind of images do we want?
-IMAGE_FSTYPES += "tar.bz2"
-
-# Make use of SMP:
-#   PARALLEL_MAKE specifies how many concurrent compiler threads are spawned per bitbake process
-#   BB_NUMBER_THREADS specifies how many concurrent bitbake tasks will be run
-#PARALLEL_MAKE     = "-j4"
-BB_NUMBER_THREADS = "8"
-
-DISTRO   = "${DISTRO}"
-MACHINE ?= "${MACHINE}"
-
-# Set TMPDIR instead of defaulting it to $pwd/tmp
-TMPDIR = "${OE_BUILD_TMPDIR}"
-
-# Don't generate the mirror tarball for SCM repos, the snapshot is enough
-BB_GENERATE_MIRROR_TARBALLS = "0"
-
-# Go through the Firewall
-#HTTP_PROXY        = "http://${PROXYHOST}:${PROXYPORT}/"
-
-_EOF
-fi
+    #manage meta-openembedded and meta-angstrom with layerman
+    env gawk -v command=update -f ${OE_BASE}/scripts/layers.awk ${OE_SOURCE_DIR}/layers.txt 
 }
 
 ###############################################################################
@@ -425,8 +317,50 @@ fi
 _EOF
         chmod +x ${GIT_CONFIG_DIR}/git-proxy.sh
         export GIT_PROXY_COMMAND=${GIT_CONFIG_DIR}/git-proxy.sh
-        echo "export GIT_PROXY_COMMAND=\"\${GIT_CONFIG_DIR}/git-proxy.sh\"" >> ~/.oe/environment-2008
     fi
+}
+
+###############################################################################
+# tag_layers - Tag all layers with a given tag
+###############################################################################
+function tag_layers()
+{
+    set_environment
+    env gawk -v command=tag -v commandarg=$TAG -f ${OE_BASE}/scripts/layers.awk ${OE_SOURCE_DIR}/layers.txt 
+    echo $TAG >> ${OE_BASE}/tags
+}
+
+###############################################################################
+# changelog - Display changelog for all layers with a given tag
+###############################################################################
+function changelog()
+{
+	set_environment
+	env gawk -v command=changelog -v commandarg=$TAG -f ${OE_BASE}/scripts/layers.awk ${OE_SOURCE_DIR}/layers.txt 
+}
+
+###############################################################################
+# layer_info - Get layer info
+###############################################################################
+function layer_info()
+{
+	set_environment
+	rm -f ${OE_SOURCE_DIR}/info.txt
+	env gawk -v command=info -f ${OE_BASE}/scripts/layers.awk ${OE_SOURCE_DIR}/layers.txt
+	echo
+	echo "Showing contents of ${OE_SOURCE_DIR}/info.txt:"
+	echo
+	cat ${OE_SOURCE_DIR}/info.txt
+	echo
+}
+
+###############################################################################
+# checkout - Checkout all layers with a given tag
+###############################################################################
+function checkout()
+{
+set_environment
+env gawk -v command=checkout -v commandarg=$TAG -f ${OE_BASE}/scripts/layers.awk ${OE_SOURCE_DIR}/layers.txt 
 }
 
 
@@ -440,18 +374,50 @@ if [ $# -gt 0 ]
 then
     if [ $1 = "update" ]
     then
-        shift
-        if [ ! -r $1 ]; then
-            if [  $1 == "commit" ]
-            then
-                shift
-                OE_COMMIT_ID=$1
-            fi
-        fi
         update_all
         exit 0
     fi
 
+    if [ $1 = "info" ]
+    then
+        layer_info
+        exit 0
+    fi
+
+    if [ $1 = "tag" ]
+    then
+        if [ -n "$2" ] ; then
+            TAG="$2"
+        else
+            TAG="$(date -u +'%Y%m%d-%H%M')"
+        fi
+        tag_layers $TAG
+        exit 0
+    fi
+    
+    if [ $1 = "changelog" ]
+    then
+        if [ -z $2 ] ; then
+            echo "Changelog needs an argument"
+            exit 1
+        else
+            TAG="$2"
+        fi
+        changelog
+        exit 0
+    fi
+    
+    if [ $1 = "checkout" ]
+    then
+        if [ -z $2 ] ; then
+            echo "Checkout needs an argument"
+            exit 1
+        else
+            TAG="$2"
+        fi
+        checkout
+        exit 0
+    fi
     if [ $1 = "bitbake" ]
     then
         shift
@@ -479,18 +445,22 @@ fi
 echo ""
 echo "Usage: $0 config <machine>"
 echo "       $0 update"
+echo "       $0 tag [tagname]"
+echo "       $0 changelog <tagname>"
+echo "       $0 checkout <tagname>"
+echo "       $0 clean"
 echo ""
 echo "       Not recommended, but also possible:"
 echo "       $0 bitbake <bitbake target>"
-echo "       It is recommended to do '. ~/.oe/environment-2008' and run 'bitbake something' without using oebb.sh as wrapper"
+echo "       It is recommended to do '. ${OE_ENV_FILE}' and run 'bitbake something' inside ${BUILDDIR} without using oebb.sh as wrapper"
 echo ""
 echo "You must invoke \"$0 config <machine>\" and then \"$0 update\" prior"
 echo "to your first bitbake command"
 echo ""
 echo "The <machine> argument can be one of the following"
-echo "       beagleboard:    BeagleBoard"
-echo "       davinci-evm:    DM6446 EVM"
-echo "       omap3evm:       OMAP35x EVM"
-echo "       am3517-evm:     AM3517 (Shiva) EVM"
+echo "       beagleboard:   BeagleBoard"
+echo "       qemuarm        Emulated ARM machine"
+echo "       qemumips:      Emulated MIPS machine"
+echo "       fri2-noemgd:   Intel FRI2 machine without graphics"
 echo ""
 echo "Other machines are valid as well, but listing those would make this message way too long"
